@@ -1,0 +1,73 @@
+# Virtual environment
+
+venv/
+.venv/
+env/
+
+# Python cache
+
+**pycache**/
+*.py[cod]
+*$py.class
+
+# Jupyter
+
+.ipynb_checkpoints/
+
+# IDE / editor
+
+.vscode/
+.idea/
+
+# Environment variables / secrets
+
+.env
+.env.*
+!.env.example
+
+# Logs
+
+*.log
+
+# OS files
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python packaging
+
+*.egg-info/
+dist/
+build/
+
+# Hugging Face / ML cache
+
+.cache/
+huggingface_cache/
+transformers_cache/
+
+# Local databases / indexes
+
+*.db
+*.sqlite
+*.sqlite3
+
+# Project-generated data
+
+data/processed/
+data/indexes/
+
+# Large source files
+
+*.pdf
+
+# Temporary files
+
+*.tmp
+*.bak
+*.swp
+
+# Streamlit
+
+.streamlit/secrets.toml

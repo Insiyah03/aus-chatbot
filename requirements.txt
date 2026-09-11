@@ -1,0 +1,9 @@
+pymupdf
+pdfplumber
+ollama
+chromadb
+rank-bm25
+numpy
+python-dotenv
+streamlit
+sentence-transformers
