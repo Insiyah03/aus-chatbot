@@ -87,6 +87,7 @@ Install [Ollama](https://ollama.com/) and download the required models:
 ```bash
 ollama pull mxbai-embed-large
 ollama pull llama3.2
+ollama pull llama3.2:1b
 ```
 
 ## Running the Assistant

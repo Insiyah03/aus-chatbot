@@ -25,7 +25,7 @@ from src.embeddings.build_index import get_collection, get_ollama_client, load_c
 from src.retrieval.build_bm25_index import check_index_freshness, load_bm25_index
 from src.retrieval.hybrid_search import hybrid_search
 
-ANSWER_MODEL = "llama3.2:1b"
+ANSWER_MODEL = "llama3.2"
 
 # Explicit, not left to Ollama's default -- see module docstring.
 # Sized to actual observed usage: ~6-8 retrieved chunks plus the
@@ -69,7 +69,10 @@ than listing them separately.
 # CONTEXT BUILDING
 # ============================================================
 
-def build_context(chunks: list[dict]) -> tuple[str, list[dict]]:
+def build_context(
+    chunks: list[dict],
+    methods_by_id: dict[str, set[int]] | None = None,
+) -> tuple[str, list[dict]]:
     """
     Assembles the context block sent to the model, and the
     deterministic source list used for the citation footer
@@ -79,8 +82,14 @@ def build_context(chunks: list[dict]) -> tuple[str, list[dict]]:
     long tail of low-relevance chunks doesn't silently blow the
     context budget -- better to answer well from fewer, more
     relevant excerpts than truncate mid-chunk.
+
+    methods_by_id (optional): chunk_id -> {0, 1} from
+    hybrid_search's RRF fusion (0 = found by BM25, 1 = found by
+    vector search), so callers like the UI can show *why* a source
+    was retrieved.
     """
 
+    methods_by_id = methods_by_id or {}
     parts = []
     sources = []
     total_chars = 0
@@ -96,6 +105,9 @@ def build_context(chunks: list[dict]) -> tuple[str, list[dict]]:
         parts.append(block)
         total_chars += len(block)
 
+        raw_methods = methods_by_id.get(chunk.get("id"), set())
+        methods = sorted({"bm25" if m == 0 else "vector" for m in raw_methods})
+
         sources.append(
             {
                 "id": chunk.get("id"),
@@ -103,6 +115,7 @@ def build_context(chunks: list[dict]) -> tuple[str, list[dict]]:
                 "course_code": chunk.get("course_code") or "",
                 "type": chunk.get("type") or "",
                 "title": chunk.get("title") or "",
+                "methods": methods,
             }
         )
 
@@ -133,22 +146,68 @@ def format_sources(sources: list[dict]) -> str:
             continue
         seen.add(key)
 
-        lines.append(f"- {label} (p. {source['page']})")
+        via = "+".join(source.get("methods") or []) or "?"
+        lines.append(f"- {label} (p. {source['page']}) [{via}]")
 
     return "Sources:\n" + "\n".join(lines)
+
+
+# How many prior turns (user+assistant pairs) to carry into the
+# LLM prompt for conversational memory. Kept small deliberately:
+# each turn adds to the prompt the model has to process, and given
+# CPU-bound generation is already the bottleneck (see the timing
+# investigation), unbounded history would make every later question
+# progressively slower. 3 turns is enough for short follow-ups
+# ("what about its prerequisites?") without letting the prompt grow
+# unboundedly over a long conversation.
+HISTORY_TURNS = 3
 
 
 # ============================================================
 # GENERATION
 # ============================================================
 
-def build_messages(query: str, context: str) -> list[dict]:
+def build_messages(query: str, context: str, history: list[dict] | None = None) -> list[dict]:
+    """
+    history (optional): prior [{"role": "user"/"assistant", "content": ...}, ...]
+    turns, most recent last. These are included as-is (without
+    re-attaching their own catalog excerpts) so the model has
+    conversational context for follow-ups like "what about its
+    prerequisites?" without repeating old context blocks in every
+    turn. Capped to HISTORY_TURNS pairs by the caller.
+    """
+
     user_content = f"Catalog excerpts:\n\n{context}\n\n---\n\nQuestion: {query}"
 
-    return [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_content},
-    ]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if history:
+        messages.extend(history[-HISTORY_TURNS * 2 :])
+    messages.append({"role": "user", "content": user_content})
+
+    return messages
+
+
+def build_retrieval_query(query: str, history: list[dict] | None = None) -> str:
+    """
+    Folds the previous user turn into the retrieval query so a
+    short follow-up ("what about its prerequisites?") still
+    retrieves relevant chunks even though it has no useful keywords
+    or embedding signal on its own. Cheap (no extra LLM call) --
+    just string concatenation -- at the cost of occasionally
+    dragging in slightly stale context for a genuinely unrelated
+    new question. For a catalog Q&A bot, that tradeoff favors
+    follow-up quality more often than it hurts.
+    """
+
+    if not history:
+        return query
+
+    last_user = next((m["content"] for m in reversed(history) if m.get("role") == "user"), None)
+
+    if not last_user or last_user.strip() == query.strip():
+        return query
+
+    return f"{last_user} {query}"
 
 
 def generate_answer(
@@ -158,14 +217,20 @@ def generate_answer(
     collection,
     client,
     top_n: int = DEFAULT_TOP_N,
+    history: list[dict] | None = None,
+    model: str = ANSWER_MODEL,
+    temperature: float = 0.1,
+    num_ctx: int = NUM_CTX,
 ) -> dict:
     """
-    Returns {"answer": str, "sources": [...], "chunks_used": [...]}.
+    Returns {"answer": str, "answer_text": str, "sources": [...], "chunks_used": [...]}.
     """
 
     chunks_by_id = {c["id"]: c for c in load_chunks()}
 
-    fused = hybrid_search(query, bm25, bm25_ids, collection, client, top_n=top_n)
+    retrieval_query = build_retrieval_query(query, history)
+    fused = hybrid_search(retrieval_query, bm25, bm25_ids, collection, client, top_n=top_n)
+    methods_by_id = {chunk_id: methods for chunk_id, _score, methods in fused}
     retrieved_chunks = [chunks_by_id[chunk_id] for chunk_id, _score, _src in fused if chunk_id in chunks_by_id]
 
     if not retrieved_chunks:
@@ -177,13 +242,13 @@ def generate_answer(
             "chunks_used": [],
         }
 
-    context, sources = build_context(retrieved_chunks)
-    messages = build_messages(query, context)
+    context, sources = build_context(retrieved_chunks, methods_by_id)
+    messages = build_messages(query, context, history)
 
     response = client.chat(
-        model=ANSWER_MODEL,
+        model=model,
         messages=messages,
-        options={"num_ctx": NUM_CTX, "temperature": 0.1},
+        options={"num_ctx": num_ctx, "temperature": temperature},
         keep_alive=KEEP_ALIVE,
     )
 
@@ -207,6 +272,11 @@ def generate_answer_stream(
     collection,
     client,
     top_n: int = DEFAULT_TOP_N,
+    history: list[dict] | None = None,
+    model: str = ANSWER_MODEL,
+    temperature: float = 0.1,
+    num_ctx: int = NUM_CTX,
+    stats: dict | None = None,
 ):
     """
     Streaming counterpart to generate_answer(). The model takes the
@@ -217,39 +287,65 @@ def generate_answer_stream(
     generate_answer() remains for the CLI and for callers that just
     want the final string.
 
+    history (optional): prior conversation turns for multi-turn
+    follow-up support (see build_messages/build_retrieval_query).
+
+    stats (optional): a dict the caller provides and this function
+    mutates in place with timing info -- can't be returned normally
+    since the generator's return value isn't available until fully
+    consumed. Populated keys: "retrieval_s", "first_token_s" (once
+    the first token arrives), "total_s" (once the stream ends).
+
     Returns (token_generator, sources, chunks_used). Retrieval
     happens eagerly (sources/chunks_used are ready immediately);
     only generation is deferred to the generator, since sources
     don't depend on the model's output.
     """
 
+    t0 = time.perf_counter()
+
     chunks_by_id = {c["id"]: c for c in load_chunks()}
 
-    fused = hybrid_search(query, bm25, bm25_ids, collection, client, top_n=top_n)
+    retrieval_query = build_retrieval_query(query, history)
+    fused = hybrid_search(retrieval_query, bm25, bm25_ids, collection, client, top_n=top_n)
+    methods_by_id = {chunk_id: methods for chunk_id, _score, methods in fused}
     retrieved_chunks = [chunks_by_id[chunk_id] for chunk_id, _score, _src in fused if chunk_id in chunks_by_id]
+
+    if stats is not None:
+        stats["retrieval_s"] = time.perf_counter() - t0
 
     if not retrieved_chunks:
         no_result_text = "I couldn't find anything relevant to that question in the catalog."
 
         def empty_stream():
+            if stats is not None:
+                stats["first_token_s"] = time.perf_counter() - t0
+                stats["total_s"] = time.perf_counter() - t0
             yield no_result_text
 
         return empty_stream(), [], []
 
-    context, sources = build_context(retrieved_chunks)
-    messages = build_messages(query, context)
+    context, sources = build_context(retrieved_chunks, methods_by_id)
+    messages = build_messages(query, context, history)
 
     def token_stream():
+        first = True
         for part in client.chat(
-            model=ANSWER_MODEL,
+            model=model,
             messages=messages,
-            options={"num_ctx": NUM_CTX, "temperature": 0.1},
+            options={"num_ctx": num_ctx, "temperature": temperature},
             keep_alive=KEEP_ALIVE,
             stream=True,
         ):
             piece = part["message"]["content"]
             if piece:
+                if first and stats is not None:
+                    stats["first_token_s"] = time.perf_counter() - t0
+                    first = False
                 yield piece
+
+        if stats is not None:
+            stats["total_s"] = time.perf_counter() - t0
 
     return token_stream(), sources, [c["id"] for c in retrieved_chunks]
 
