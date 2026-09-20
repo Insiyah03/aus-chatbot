@@ -1,14 +1,42 @@
-import fitz
+import pymupdf
 import json
-from pathlib import Path
-from src.config import (PDF_PATH, PAGES_PATH)
+
+from src.config import PDF_PATH, PAGES_PATH
 
 
 OUTPUT_PATH = PAGES_PATH
 
 
+def clean_headers_footers(blocks, page_height):
+    """
+    Remove header and footer blocks based on their vertical position.
+    """
+
+    HEADER_HEIGHT = 50
+    FOOTER_HEIGHT = 50
+
+    cleaned_blocks = []
+
+    for block in blocks:
+
+        y0 = block["y0"]
+        y1 = block["y1"]
+
+        # Remove header
+        if y1 <= HEADER_HEIGHT:
+            continue
+
+        # Remove footer
+        if y0 >= page_height - FOOTER_HEIGHT:
+            continue
+
+        cleaned_blocks.append(block)
+
+    return cleaned_blocks
+
+
 def extract_pdf():
-    doc = fitz.open(PDF_PATH)
+    doc = pymupdf.open(PDF_PATH)
 
     pages = []
 
@@ -40,14 +68,33 @@ def extract_pdf():
                 "text": text,
             })
 
-        # Keep the original PyMuPDF text as a fallback.
-        raw_text = page.get_text("text")
+        # Remove headers and footers
+        page_blocks = clean_headers_footers(
+            page_blocks,
+            page.rect.height
+        )
+
+        # Sort blocks into reading order
+        page_blocks.sort(
+            key=lambda block: (
+                block["y0"],
+                block["x0"]
+            )
+        )
+
+        # Reconstruct cleaned page text
+        cleaned_text = "\n".join(
+            block["text"]
+            for block in page_blocks
+        )
 
         pages.append({
             "page": page_number,
-            "text": raw_text,
+            "text": cleaned_text,
             "blocks": page_blocks,
         })
+
+    doc.close()
 
     OUTPUT_PATH.parent.mkdir(
         parents=True,

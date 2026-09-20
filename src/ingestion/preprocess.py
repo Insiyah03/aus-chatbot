@@ -30,7 +30,7 @@ import re
 from pathlib import Path
 from typing import Any
 from src.config import (PAGES_PATH,TABLES_PATH,COURSES_PATH,RECORDS_PATH,DOCUMENTS_PATH,CHUNKS_PATH)
-
+from src.config import (MAX_POLICY_CHARS,POLICY_OVERLAP_CHARS)
 
 # ============================================================
 # PATHS
@@ -57,21 +57,13 @@ CHUNKS_FILE = CHUNKS_PATH
 
 SECTION_RANGES = {
     "general": [(9, 34)],
-
     "achievement_courses": [(35, 37)],
-
     "admissions": [(38, 44)],
-
     "policies": [(45, 67)],
-
     "tuition_scholarships": [(68, 71)],
-
     "programs": [(72, 186)],
-
     "courses": [(187, 248)],
-
     "faculty": [(249, 254)],
-
     "directory": [(16, 16)],
 }
 
@@ -100,13 +92,9 @@ for start, end in [
 # Standard course:
 #
 #     ARC 201 Architectural Design I (3-0-0).
-#
 #     CSE 312A Something (3-0-0).
-#
 #     MTH 103 Mathematics (3-0-0).
-#
 # The key feature is the "(x-x-x)." marker.
-#
 # We deliberately DO NOT require the course code to appear at
 # the beginning of a line because PDF extraction can flatten
 # columns/lines.
@@ -138,7 +126,6 @@ COURSE_START_RE = re.compile(
 
 
 # BPE has a special unnumbered course-like entry.
-
 BPE_UNNUMBERED_RE = re.compile(
     r"""
     (?P<code>BPE)
@@ -1647,8 +1634,8 @@ def create_documents(
 
 def chunk_text(
     text: str,
-    max_chars: int = 1200,
-    overlap: int = 150,
+    max_chars: int = MAX_POLICY_CHARS,
+    overlap: int = POLICY_OVERLAP_CHARS,
 ) -> list[str]:
     """
     Generic text chunking.
@@ -1717,8 +1704,8 @@ def create_chunks(
 
         document_chunks = chunk_text(
             text,
-            max_chars=1200,
-            overlap=150,
+            max_chars=MAX_POLICY_CHARS,
+            overlap=POLICY_OVERLAP_CHARS,
         )
 
         for chunk_index, chunk in enumerate(

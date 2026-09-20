@@ -31,6 +31,7 @@ Ollama models:
 
 ```powershell
 ollama pull llama3.2
+ollama pull llama
 ollama pull mxbai-embed-large
 ```
 
