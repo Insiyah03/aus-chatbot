@@ -4,8 +4,6 @@ A local Retrieval-Augmented Generation (RAG) assistant for answering questions a
 
 The system retrieves relevant information from the catalog and uses a local Ollama language model to generate answers grounded in the retrieved content, with page citations back to the source PDF.
 
-**Live demo:** _[add your hosted URL here, if/when deployed]_
-
 ## Features
 
 * Ask natural-language questions about courses, prerequisites, programs, scholarships, deadlines, and fees
