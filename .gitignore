@@ -71,3 +71,8 @@ data/indexes/
 # Streamlit
 
 .streamlit/secrets.toml
+
+# Testing Files
+test_embed.py'
+testing.ipynb'
+version_1.md'
