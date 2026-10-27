@@ -202,7 +202,7 @@ def main() -> None:
             chunk = chunks_by_id.get(chunk_id, {})
             label = chunk.get("course_code") or chunk.get("type") or ""
             page = chunk.get("page")
-            snippet = (chunk.get("text") or "")[:160].replace("\n", " ").strip()
+            snippet = (chunk.get("text") or "")[:3000].replace("\n", " ").strip()
             print(f"{rank}. [{label} | page {page} | score {score:.3f}] {snippet}...")
 
 
