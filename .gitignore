@@ -74,6 +74,8 @@ data/indexes/
 
 # Testing Files
 test_embed.py'
-testing.ipynb'
+exploring.ipynb'
 version_1.md'
 rag_concepts_summary.md
+
+scrap
