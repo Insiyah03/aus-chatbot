@@ -157,14 +157,14 @@ average chunk length.
 The structure mapping terms to the chunks that contain them is called an
 **inverted index**.
 
-Conceptually:
+**Conceptually:**
 
-  Term             Chunks containing the term
-  ---------------- ----------------------------
-  `cse`            Chunk 1, Chunk 2
-  `320`            Chunk 1, Chunk 2
-  `prerequisite`   Chunk 1, Chunk 3
-  `calculus`       Chunk 3
+| Term | Chunks containing the term |
+|---|---|
+| `cse` | Chunk 1, Chunk 2 |
+| `320` | Chunk 1, Chunk 2 |
+| `prerequisite` | Chunk 1, Chunk 3 |
+| `calculus` | Chunk 3 |
 
 The numbers and chunks in this table are illustrative.
 
@@ -192,16 +192,42 @@ order.
 
 A common BM25 formula is:
 
-\[ `\operatorname{BM25}`{=tex}(D,Q)= `\sum`{=tex}\_{t`\in `{=tex}Q}
-`\operatorname{IDF}`{=tex}(t) `\frac{f(t,D)(k_1+1)}`{=tex}
-{f(t,D)+k_1`\left`{=tex}(1-b+b`\frac{|D|}{\operatorname{avgdl}}`{=tex}`\right`{=tex})}
-\]
+### Formula
 
-Where: - (D) is a chunk/document and (Q) is the query. - (f(t,D)) is the
-frequency of term (t) in the chunk. - (k_1) controls term-frequency
-saturation. - (b) controls document-length normalization. - (\|D\|) is
-the chunk length and (`\operatorname{avgdl}`{=tex}) is average chunk
-length.
+**BM25 score = sum over query terms of:**
+
+`IDF(t) × [f(t,D) × (k1 + 1)] / [f(t,D) + k1 × (1 - b + b × (|D| / avgdl))]`
+
+Where:
+
+- **D** is a chunk or document.
+- **Q** is the query containing the terms being searched for.
+- **t** is a term in the query.
+- **f(t, D)** is the frequency of term `t` in chunk `D`.
+- **IDF(t)** measures how rare or informative term `t` is across the document collection. Rare terms generally receive higher weights.
+- **k1** controls term-frequency saturation. It determines how quickly the benefit of repeating a term decreases.
+- **b** controls document-length normalization, usually with a value between 0 and 1.
+- **|D|** is the length of chunk `D`, typically measured in tokens.
+- **avgdl** is the average chunk length across the document collection.
+
+### How It Works
+
+BM25 assigns a relevance score to each chunk based on the query terms it contains.
+
+- **Term frequency:** A chunk generally scores higher when it contains more occurrences of a query term, but the benefit of additional occurrences gradually decreases.
+- **Inverse document frequency (IDF):** Rare query terms contribute more to the score than common terms.
+- **Document-length normalization:** The formula adjusts for chunk length so that longer chunks do not automatically receive an unfair advantage.
+
+### Small Example
+
+Suppose the query is `computer science prerequisites`.
+
+- **Chunk A** contains all three terms, including the relatively rare term `prerequisites`.
+- **Chunk B** contains only the common term `computer`.
+
+Chunk A will generally receive a higher BM25 score because it matches more query terms, including a potentially more informative term.
+
+**In your RAG pipeline:** BM25 provides lexical retrieval by matching query terms against indexed chunks. Its results can then be combined with vector-search results using Reciprocal Rank Fusion (RRF).
 
 The exact scoring formula and tokenization details can vary between
 implementations.
@@ -246,32 +272,37 @@ rank in each result list.
 
 ### Formula
 
-RRF score = sum over retrieval lists of 1 / (k + rank of the chunk)  
+RRF combines rankings from multiple retrieval systems using the following formula:
 
-Where: - (d) is a chunk. - (R) is the set of retrieval result lists. -
-(`\operatorname{rank}`{=tex}\_r(d)) is the chunk's rank in list (r),
-starting at 1. - (k) is a constant, commonly 60.
+**RRF score = Σ [1 / (k + rank)]**
 
-A chunk receives a contribution from each list in which it appears. A
-chunk ranked highly by both retrievers can receive a strong combined
-score.
+Where:
 
-### Small example
+- **k** is a constant, commonly set to 60.
+- **rank** is the position of a chunk in a retrieval result list, starting at 1.
+- Each retrieval list contributes `1 / (k + rank)` to the chunk's total score.
+- A chunk that appears near the top of multiple retrieval lists receives a higher combined score.
 
-Suppose `Chunk A` is rank 1 in vector search and rank 2 in BM25, with
-(k=60):
+### Small Example
 
-\[
-`\operatorname{RRF}`{=tex}(A)=`\frac{1}{61}`{=tex}+`\frac{1}{62}`{=tex}
-`\approx 0.03252`{=tex} \]
+Suppose `Chunk A` ranks first in vector search and second in BM25, with `k = 60`.
 
-If `Chunk B` appears only at rank 2 in vector search:
+**Chunk A:**
 
-\[ `\operatorname{RRF}`{=tex}(B)=`\frac{1}{62}`{=tex}
-`\approx 0.01613`{=tex} \]
+- Vector search contribution: `1 / (60 + 1) = 1 / 61`
+- BM25 contribution: `1 / (60 + 2) = 1 / 62`
 
-Chunk A receives the larger fused score because it ranks highly in both
-lists.
+Total score:
+
+`RRF(A) = 1/61 + 1/62 ≈ 0.03252`
+
+Suppose `Chunk B` appears only at rank 2 in vector search.
+
+**Chunk B:**
+
+`RRF(B) = 1 / (60 + 2) ≈ 0.01613`
+
+**Conclusion:** Chunk A receives the higher score because it ranks highly in both retrieval lists, while Chunk B receives a contribution from only one list.
 
 ### What RRF does and does not do
 
